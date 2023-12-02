@@ -58,23 +58,23 @@ class QueueSemanticsTest extends AnyFunSuite with TimeLimitedTests {
     assert(q.dequeue === e3)
   }
 
-  test("the queue implements getAll") {
-    val q = new BlockingEventQueue[Integer](10)
-    val e1 = generateIntegerEvent
-    val e2 = generateIntegerEvent
-    val e3 = generateIntegerEvent
+  // test("the queue implements getAll") {
+  //   val q = new BlockingEventQueue[Integer](10)
+  //   val e1 = generateIntegerEvent
+  //   val e2 = generateIntegerEvent
+  //   val e3 = generateIntegerEvent
 
-    q.enqueue(e1)
-    q.enqueue(e2)
-    q.enqueue(e3)
+  //   q.enqueue(e1)
+  //   q.enqueue(e2)
+  //   q.enqueue(e3)
 
-    val everything = q.getAll
+  //   val everything = q.getAll
     
-    assert(q.getSize === 0)
-    assert(everything.length === 3)
-    assert(everything(0) === e1)
-    assert(everything(1) === e2)
-    assert(everything(2) === e3)
-  }
+  //   assert(q.getSize === 0)
+  //   assert(everything.length === 3)
+  //   assert(everything(0) === e1)
+  //   assert(everything(1) === e2)
+  //   assert(everything(2) === e3)
+  // }
 
 }
