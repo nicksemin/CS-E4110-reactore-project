@@ -70,6 +70,56 @@ class HangmanGame(
     println("Game terminated")
   }
 
+  /** Adds a player to the game by adding their message handler to the
+    * dispatcher.
+    *
+    * @param playerMessageHandler
+    *   The message handler for the player.
+    */
+  private def addPlayer(
+      playerMessageHandler: HangmanPlayerMessageHandler
+  ): Unit = {
+    println("Player connected")
+    dispatcher.addHandler(playerMessageHandler)
+    playerMessageHandlers = playerMessageHandlers + playerMessageHandler
+  }
+
+  /** Removes a player from the game by removing their message handler from the
+    * dispatcher.
+    *
+    * @param playerMessageHandler
+    *   The message handler for the player.
+    */
+  private def removePlayer(
+      playerMessageHandler: HangmanPlayerMessageHandler
+  ): Unit = {
+    playerMessageHandler.getPlayerName match {
+      case Some(name) => println(s"Player $name disconnected")
+      case None       => println("Player disconnected before entering name")
+    }
+    playerMessageHandler.getHandle.close()
+    dispatcher.removeHandler(playerMessageHandler)
+    playerMessageHandlers = playerMessageHandlers - playerMessageHandler
+  }
+
+  /** Makes a guess in the game and sends the current game state to all players
+    * who have identified themselves.
+    *
+    * @param guess
+    *   The guess to be made.
+    */
+  private def makeGuess(guess: Char, playerName: String): Unit = {
+    gameState = gameState.makeGuess(guess)
+    playerMessageHandlers
+      .filter(_.identifiedThemself)
+      .foreach(messageHandler =>
+        messageHandler.getHandle.write(
+          s"$guess ${gameState.getMaskedWord} ${gameState.guessCount} $playerName"
+        )
+      )
+    if (gameState.isGameOver) terminate("Game over")
+  }
+
   /** Handles new connections for the Hangman game.
     *
     * @param handle
@@ -85,17 +135,10 @@ class HangmanGame(
       * @param socket
       *   The socket for the new connection.
       */
-    override def handleEvent(socket: Socket): Unit = {
-      // If the socket is null, the server socket threw an IOException and is
-      // no longer accepting connections
-      if (socket == null) {
-        terminate("Server socket closed. Likely due to IOException")
-        return
-      }
-      val tcpHandle = new TCPTextHandle(socket)
-      val messageHandler = new HangmanPlayerMessageHandler(tcpHandle)
-      playerMessageHandlers = playerMessageHandlers + messageHandler
-      dispatcher.addHandler(messageHandler)
+    override def handleEvent(socket: Socket): Unit = socket match {
+      case null => terminate("Server socket closed")
+      case _ =>
+        addPlayer(new HangmanPlayerMessageHandler(new TCPTextHandle(socket)))
     }
   }
 
@@ -106,9 +149,7 @@ class HangmanGame(
     */
   final class HangmanPlayerMessageHandler(val handle: TCPTextHandle)
       extends EventHandler[String] {
-    private var name = Option.empty[String]
-
-    class PlayerNameNotFoundException extends NoSuchElementException
+    private var playerName = Option.empty[String]
 
     override def getHandle: TCPTextHandle = handle
 
@@ -117,25 +158,21 @@ class HangmanGame(
       * @param message
       *   The message from the player.
       */
-    override def handleEvent(message: String): Unit = {
+    override def handleEvent(message: String): Unit =
       // If the message is null, the player is disconnected and the socket is
       // closed
-      if (message == null) {
-        this.name match {
-          case None       => println("Player disconnected before entering name")
-          case Some(name) => println("Player " + name + " disconnected")
-        }
-        dispatcher.removeHandler(this)
-        playerMessageHandlers = playerMessageHandlers - this
-        return
+      message match {
+        case null => removePlayer(this)
+        case _    =>
+          // If the player has not identified themself, consider the message to be
+          // their name. Otherwise, consider the message to be a guess.
+          this.playerName match {
+            case None => this.handleNewPlayer(message)
+            case Some(playerName) =>
+              if (this.isMessageValid(message))
+                makeGuess(message.charAt(0), playerName)
+          }
       }
-      // If the player has not identified themself, consider the message to be
-      // their name
-      this.name match {
-        case None       => handleNewPlayer(message)
-        case Some(name) => handlePlayerMessage(name, message)
-      }
-    }
 
     /** Handles a new player by identifying them and sending the current game
       * state.
@@ -143,49 +180,21 @@ class HangmanGame(
       * @param message
       *   The name of the new player.
       */
-    private def handleNewPlayer(message: String): Unit = {
-      if (
-        message == null ||
-        message.isEmpty ||
-        !message.forall(_.isLetter)
-      )
-        return
-      val name = message
-      this.getHandle.write(gameState.getMaskedWord + " " + gameState.guessCount)
-      this.name = Option(name)
-    }
-
-    /** Handles a message from a player by making a guess and sending the
-      * current game state to all players.
-      *
-      * @param playerName
-      *   The name of the player.
-      * @param message
-      *   The message from the player.
-      */
-    private def handlePlayerMessage(
-        playerName: String,
-        message: String
-    ): Unit = {
-      if (
-        message == null ||
-        message.isEmpty ||
-        !message.forall(_.isLetter)
-      ) return
-      // Only accept the first chracter if more than one character is sent
-      val guess = message.charAt(0)
-      gameState = gameState.makeGuess(guess)
-      playerMessageHandlers
-        .filter(_.identifiedThemself)
-        .foreach(messageHandler =>
-          messageHandler.getHandle.write(
-            guess + " " + gameState.getMaskedWord + " " + gameState.guessCount + " " + playerName
-          )
+    private def handleNewPlayer(message: String): Unit =
+      if (this.isMessageValid(message)) {
+        println("Player identified as " + message)
+        this.getHandle.write(
+          gameState.getMaskedWord + " " + gameState.guessCount
         )
-      if (gameState.isGameOver) terminate("Game over")
-    }
+        this.playerName = Option(message)
+      }
 
-    def identifiedThemself: Boolean = this.name.isDefined
+    private def isMessageValid(message: String): Boolean =
+      message != null && !message.isEmpty && message.forall(_.isLetter)
+
+    def identifiedThemself: Boolean = this.playerName.isDefined
+
+    def getPlayerName: Option[String] = this.playerName
   }
 }
 
